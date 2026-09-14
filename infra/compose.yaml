@@ -1,0 +1,17 @@
+name: ddao
+
+services:
+  database:
+    image: postgres:17-alpine
+    container_name: ddao-database
+    environment:
+      POSTGRES_USER: local_user
+      POSTGRES_PASSWORD: local_password
+      POSTGRES_DB: local_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - database-data:/var/lib/postgresql/data
+
+volumes:
+  database-data:
