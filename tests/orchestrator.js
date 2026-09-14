@@ -1,5 +1,7 @@
 import retry from "async-retry";
 
+import database from "infra/database";
+
 const WEB_SERVER_URL = "http://localhost:3000";
 
 async function waitForAllServices() {
@@ -22,8 +24,13 @@ async function waitForWebServer() {
   }
 }
 
+async function clearDatabase() {
+  await database.query("DROP SCHEMA public CASCADE; CREATE SCHEMA public;");
+}
+
 const orchestrator = {
   waitForAllServices,
+  clearDatabase,
   webServerUrl: WEB_SERVER_URL,
 };
 

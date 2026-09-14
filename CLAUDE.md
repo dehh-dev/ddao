@@ -5,9 +5,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## O que é
 
 `ddao` — dashboard da vida pessoal. API REST versionada em `/api/v1` sobre Postgres.
-Ainda **não há entidades de domínio**: `models/` está vazio, `infra/migrations/` está vazio
-e o único endpoint é `GET /api/v1/status`. `bcryptjs` ainda não é dependência — entra
-junto com a primeira entidade que tiver senha.
+Ainda **não há entidades de domínio**: `infra/migrations/` está vazio e os endpoints
+existentes (`/api/v1/status` e `/api/v1/migrations`) são ambos de infraestrutura.
+`bcryptjs` ainda não é dependência — entra junto com a primeira entidade que tiver senha.
 
 ## Stack
 
@@ -51,6 +51,35 @@ Um handler HTTP nunca monta SQL e nunca importa `pg`. Um model nunca toca em `re
 **Exceção deliberada:** `pages/api/v1/status/index.js` chama `infra/database.js` direto. O
 recurso `status` é diagnóstico da própria infraestrutura — não existe regra de negócio ali, e
 criar um `models/status.js` seria só um repasse. Todo recurso de domínio passa por `models/`.
+
+`/api/v1/migrations` já segue o caminho completo: a rota só decide status HTTP, e
+`models/migrator.js` é quem envolve o `node-pg-migrate`.
+
+### Endpoints
+
+| Endpoint                  | Comportamento                                                             |
+| ------------------------- | ------------------------------------------------------------------------- |
+| `GET /api/v1/status`      | Versão do Postgres, `max_connections` e conexões abertas                  |
+| `GET /api/v1/migrations`  | **Dry run**: lista as migrations pendentes sem aplicar. Sempre 200        |
+| `POST /api/v1/migrations` | Aplica as pendentes. **201** se aplicou alguma, **200** se não havia nada |
+
+Nos dois métodos de `/migrations` o corpo é um array de `{ path, name, timestamp }` —
+é o retorno cru do `runner` do node-pg-migrate, incluindo o caminho absoluto no servidor.
+
+**`POST /api/v1/migrations` não tem autenticação e altera o esquema do banco.** Enquanto o
+projeto só roda local isso é aceitável; antes de qualquer deploy, é o primeiro endpoint que
+precisa de proteção.
+
+### models/migrator.js
+
+Envolve o `runner` do `node-pg-migrate` (named export, não default — mudou no v9). Os dois
+métodos diferem só no `dryRun`, e o `dir` é resolvido a partir de `process.cwd()`, então o
+runner lê em produção o mesmo diretório que lê nos testes.
+
+Migrations usam uma conexão **dedicada e persistente** (`database.getNewClient()`), não o
+`database.query()` — o runner precisa segurar o mesmo client durante toda a execução, e é o
+`migrator` que fecha esse client no `finally`. Corrida entre dois POST simultâneos é resolvida
+pelo advisory lock do próprio node-pg-migrate.
 
 ### Contrato de erro
 
@@ -105,6 +134,14 @@ em um exige mexer no outro.
 Só teste de integração, contra servidor e banco reais (ver preferências globais). O que é
 específico daqui:
 
+- `tests/orchestrator.js` também expõe `clearDatabase()`, que faz
+  `DROP SCHEMA public CASCADE; CREATE SCHEMA public`. Teste que dependa do estado do banco
+  chama isso no `beforeAll`. **`npm test` usa o mesmo banco do `npm run dev`** — quem sujar o
+  esquema limpa no `afterAll`.
+- `tests/fixtures/migrations.js` escreve uma migration descartável de verdade em
+  `infra/migrations/` e a remove depois. Sem ela o endpoint de migrations não teria nada
+  pendente para provar que funciona, e mockar o runner violaria a regra de só usar integração.
+  Quando existir a primeira migration real, avaliar se a fixture ainda é necessária.
 - `tests/orchestrator.js` faz a barreira de largada: `waitForAllServices()` fica batendo em
   `GET /api/v1/status` até responder 200. Todo arquivo de teste chama isso no `beforeAll`.
   Como o status só responde 200 com o banco de pé, essa espera cobre servidor **e** banco.
