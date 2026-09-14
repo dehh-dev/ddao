@@ -9,8 +9,12 @@ async function query(queryObject) {
     client = await getNewClient();
     return await client.query(queryObject);
   } catch (error) {
+    if (error instanceof ServiceError) {
+      throw error;
+    }
+
     throw new ServiceError({
-      message: "Erro na conexão com o banco ou na consulta.",
+      message: "Erro ao executar a consulta no banco de dados.",
       cause: error,
     });
   } finally {
@@ -27,7 +31,14 @@ async function getNewClient() {
     database: process.env.POSTGRES_DB,
   });
 
-  await client.connect();
+  try {
+    await client.connect();
+  } catch (error) {
+    throw new ServiceError({
+      message: "Erro na conexão com o banco de dados.",
+      cause: error,
+    });
+  }
 
   return client;
 }
